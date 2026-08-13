@@ -1,29 +1,27 @@
+// src/components/StatsBadge.tsx
 interface StatsBadgeProps {
-    label: string;
-    value: number;
-    color?: string;
+  label: string;
+  value: number;
+  variant?: 'blue' | 'green' | 'yellow' | 'red';
 }
 
-function StatsBadge({ label, value, color = '#1e293b' }: StatsBadgeProps) {
-    return (
-        <div
-            style={{
-                border: `2px solid ${color}`,
-                borderRadius: '8px',
-                padding: '16px 24px',
-                minWidth: '150px',
-                textAlign: 'center',
-                background: '#ffffff',
-            }}
-        >
-            <p style={{ margin: 0, fontSize: '28px', fontWeight: 'bold', color }}>
-                {value}
-            </p>
-            <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#64748b' }}>
-                {label}
-            </p>
-        </div>
-    );
+const variantConfig = {
+  blue: { border: 'border-blue-600', text: 'text-blue-600' },
+  green: { border: 'border-green-600', text: 'text-green-600' },
+  yellow: { border: 'border-yellow-600', text: 'text-yellow-600' },
+  red: { border: 'border-red-500', text: 'text-red-500' },
+};
+
+function StatsBadge({ label, value, variant = 'blue' }: StatsBadgeProps) {
+  const style = variantConfig[variant];
+
+  return (
+    <div className={`flex flex-col items-center px-5 py-3 rounded-lg
+                     bg-white border min-w-[120px] ${style.border}`}>
+      <span className={`text-2xl font-bold ${style.text}`}>{value}</span>
+      <span className="text-sm text-slate-500">{label}</span>
+    </div>
+  );
 }
 
 export default StatsBadge;
