@@ -1,4 +1,3 @@
-// src/layouts/Header.tsx
 import { Link, useLocation } from 'react-router-dom';
 import type { User } from '../types';
 
