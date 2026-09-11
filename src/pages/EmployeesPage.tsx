@@ -1,10 +1,10 @@
 // src/pages/EmployeesPage.tsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { Employee, Department, EmployeeStatus, EmployeeRole } from '../types';
-import { useEmployeeStore } from '../store/employeeStore';
 import EmployeeCard from '../components/EmployeCard';
 import StatsBadge from '../components/StatsBadge';
 import FormField from '../components/FormField';
+import { useEmployees, useCreateEmployee, useUpdateEmployee, useDeleteEmployee } from '../hooks/useEmployees';
 
 const formFieldClass = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 
@@ -16,13 +16,24 @@ const nextStatus: Record<EmployeeStatus, EmployeeStatus> = {
 };
 
 function EmployeesPage() {
-  // Estado global del servidor (empleados) — viene del store, no de useState local
-  const { employees, isLoading: loading, error, fetchEmployees, addEmployee, updateEmployee, deleteEmployee } = useEmployeeStore();
-
-  // Estado de los filtros
+  // Estado de los filtros — esto sigue siendo estado LOCAL (de la UI), no del servidor
   const [search, setSearch] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<Department | ''>('');
   const [selectedStatus, setSelectedStatus] = useState<EmployeeStatus | ''>('');
+
+  const { data, isLoading: loading, isError, error: queryError } = useEmployees({
+    search: search || undefined,
+    department: selectedDepartment || undefined,
+    status: selectedStatus || undefined,
+  });
+  const employees = data?.data || [];
+
+  const { data: allData } = useEmployees({});
+  const allEmployees = useMemo(() => allData?.data ?? [], [allData]);
+  const totalEmployees = allEmployees.length;
+  const activeEmployees = allEmployees.filter(emp => emp.status === 'active').length;
+  const onLeaveEmployees = allEmployees.filter(emp => emp.status === 'on_leave').length;
+  const inactiveEmployees = allEmployees.filter(emp => emp.status === 'inactive').length;
 
   // Añade este estado al inicio del componente:
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -37,74 +48,59 @@ function EmployeesPage() {
   const [newPhone, setNewPhone] = useState<string>('');
   const [newAvatarUrl, setNewAvatarUrl] = useState<string>('');
 
-  // Cargar empleados desde el store al montar la página
-  useEffect(() => {
-    fetchEmployees();
-  }, [fetchEmployees]);
-
-  // Filtrar empleados según los criterios activos
-  const filteredEmployees = employees.filter(emp => {
-    const matchesSearch = emp.name.toLowerCase().includes(search.toLowerCase()) ||
-                           emp.email.toLowerCase().includes(search.toLowerCase()) ||
-                           emp.position.toLowerCase().includes(search.toLowerCase());
-    const matchesDepartment = !selectedDepartment || emp.department === selectedDepartment;
-    const matchesStatus = !selectedStatus || emp.status === selectedStatus;
-    return matchesSearch && matchesDepartment && matchesStatus;
-  });
-
-  // Estadísticas generales (sobre el total de empleados, no sobre el filtro activo)
-  const totalEmployees = employees.length;
-  const activeEmployees = employees.filter(emp => emp.status === 'active').length;
-  const onLeaveEmployees = employees.filter(emp => emp.status === 'on_leave').length;
-  const inactiveEmployees = employees.filter(emp => emp.status === 'inactive').length;
-
   // Memoizamos el handler para no recrearlo en cada render
   const handleSelectEmployee = useCallback((employee: Employee) => {
     alert(`Empleado: ${employee.name}\nCargo: ${employee.position}\nDepartamento: ${employee.department}`);
   }, []);
 
+  const createEmployee = useCreateEmployee();
+  const updateEmployee = useUpdateEmployee();
+  const deleteEmployee = useDeleteEmployee();
+
   const handleDeleteEmployee = useCallback((id: number) => {
     if (!confirm('¿Estás seguro de eliminar este empleado?')) return;
-    deleteEmployee(id);
+    deleteEmployee.mutate(id);
   }, [deleteEmployee]);
 
   // Actualiza el estado de un empleado (ciclo Activo → En permiso → Inactivo → Activo)
   const handleToggleStatus = useCallback((employee: Employee) => {
-    updateEmployee(employee.id, { status: nextStatus[employee.status] });
+    updateEmployee.mutate({ id: employee.id, data: { status: nextStatus[employee.status] } });
   }, [updateEmployee]);
+
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Handler para agregar empleado
   const handleAddEmployee = useCallback(() => {
     if (!newName.trim() || !newEmail.trim() || !newPosition.trim() || !newHireDate) return;
 
-    const added = addEmployee({
-      name: newName.trim(),
-      email: newEmail.trim(),
-      position: newPosition.trim(),
-      department: newDepartment,
-      salary: Number(newSalary) || 0,
-      hireDate: newHireDate,
-      status: newStatus,
-      role: newRole,
+    // El API no valida emails duplicados por nosotros, asi que lo revisamos
+    // del lado del cliente antes de mandar la mutación (misma regla de la Clase 6).
+    const emailTaken = allEmployees.some(emp => emp.email === newEmail.trim());
+    if (emailTaken) {
+      setFormError(`Ya existe un empleado con el email ${newEmail.trim()}.`);
+      return;
+    }
+
+    createEmployee.mutate({
+      name: newName.trim(), email: newEmail.trim(), position: newPosition.trim(),
+      department: newDepartment, salary: Number(newSalary) || 0, hireDate: newHireDate,
+      status: newStatus, role: newRole,
       ...(newPhone.trim() && { phone: newPhone.trim() }),
       ...(newAvatarUrl.trim() && { avatarUrl: newAvatarUrl.trim() }),
+    }, {
+      onSuccess: () => {
+        setFormError(null);
+        setNewName(''); setNewEmail(''); setNewPosition('');
+        setNewDepartment('Tecnología'); setNewSalary(''); setNewHireDate('');
+        setNewStatus('active'); setNewRole('employee');
+        setNewPhone(''); setNewAvatarUrl('');
+        setShowForm(false);
+      },
+      onError: () => {
+        setFormError('No se pudo crear el empleado. Intenta de nuevo.');
+      },
     });
-
-    // Si el email ya estaba en uso, el formulario queda abierto para que se vea el error
-    if (!added) return;
-
-    setNewName('');
-    setNewEmail('');
-    setNewPosition('');
-    setNewDepartment('Tecnología');
-    setNewSalary('');
-    setNewHireDate('');
-    setNewStatus('active');
-    setNewRole('employee');
-    setNewPhone('');
-    setNewAvatarUrl('');
-    setShowForm(false);
-  }, [addEmployee, newName, newEmail, newPosition, newDepartment, newSalary,
+  }, [allEmployees, createEmployee, newName, newEmail, newPosition, newDepartment, newSalary,
       newHireDate, newStatus, newRole, newPhone, newAvatarUrl]);
 
   const departments: Department[] = ['Tecnología', 'Recursos Humanos', 'Finanzas', 'Operaciones', 'Ventas'];
@@ -128,7 +124,7 @@ function EmployeesPage() {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Gestión de Empleados</h2>
           <p className="text-slate-500 mt-1">
-            {filteredEmployees.length} de {employees.length} empleados
+            {loading ? 'Cargando...' : `${employees.length} de ${totalEmployees} empleados`}
           </p>
         </div>
         <button
@@ -151,9 +147,9 @@ function EmployeesPage() {
         <div className="p-4 mb-6 bg-white rounded-lg border border-blue-200">
           <p className="mb-3 font-semibold text-slate-900">Nuevo empleado</p>
 
-          {error && (
+          {formError && (
             <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
+              {formError}
             </div>
           )}
 
@@ -269,9 +265,10 @@ function EmployeesPage() {
           <div className="flex gap-2">
             <button
               onClick={handleAddEmployee}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+              disabled={createEmployee.isPending}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:bg-green-600/50 transition-colors"
             >
-              Guardar
+              {createEmployee.isPending ? 'Guardando...' : 'Guardar'}
             </button>
             <button
               onClick={() => setShowForm(false)}
@@ -337,22 +334,32 @@ function EmployeesPage() {
 
       {/* Estado de carga */}
       {loading && (
-        <div className="text-center py-12 text-slate-500">
-          <p>Cargando empleados...</p>
+        <div className="flex items-center justify-center py-16 text-slate-400">
+          <div className="animate-spin w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full mr-3" />
+          <span>Cargando empleados...</span>
+        </div>
+      )}
+
+      {isError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+          <p className="text-red-700 font-medium">Error al cargar los empleados</p>
+          <p className="text-red-500 text-sm mt-1">
+            {(queryError as Error)?.message || 'Error desconocido'}
+          </p>
         </div>
       )}
 
       {/* Sin resultados */}
-      {!loading && filteredEmployees.length === 0 && (
+      {!loading && !isError && employees.length === 0 && (
         <div className="text-center py-12 text-slate-500">
           <p>No se encontraron empleados con los filtros aplicados.</p>
         </div>
       )}
 
       {/* Lista de empleados */}
-      {!loading && filteredEmployees.length > 0 && (
+      {!loading && !isError && employees.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredEmployees.map(employee => (
+          {employees.map(employee => (
             <div key={employee.id} className="relative">
               <button
                 onClick={() => handleDeleteEmployee(employee.id)}
