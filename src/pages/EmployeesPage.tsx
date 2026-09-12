@@ -1,5 +1,6 @@
 // src/pages/EmployeesPage.tsx
 import { useState, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import type { Employee, Department, EmployeeStatus, EmployeeRole } from '../types';
 import EmployeeCard from '../components/EmployeCard';
 import StatsBadge from '../components/StatsBadge';
@@ -31,9 +32,9 @@ function EmployeesPage() {
   const { data: allData } = useEmployees({});
   const allEmployees = useMemo(() => allData?.data ?? [], [allData]);
   const totalEmployees = allEmployees.length;
-  const activeEmployees = allEmployees.filter(emp => emp.status === 'active').length;
-  const onLeaveEmployees = allEmployees.filter(emp => emp.status === 'on_leave').length;
-  const inactiveEmployees = allEmployees.filter(emp => emp.status === 'inactive').length;
+  const activeEmployees = allEmployees.filter((emp: Employee) => emp.status === 'active').length;
+  const onLeaveEmployees = allEmployees.filter((emp: Employee) => emp.status === 'on_leave').length;
+  const inactiveEmployees = allEmployees.filter((emp: Employee) => emp.status === 'inactive').length;
 
   // Añade este estado al inicio del componente:
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -47,11 +48,6 @@ function EmployeesPage() {
   const [newRole, setNewRole] = useState<EmployeeRole>('employee');
   const [newPhone, setNewPhone] = useState<string>('');
   const [newAvatarUrl, setNewAvatarUrl] = useState<string>('');
-
-  // Memoizamos el handler para no recrearlo en cada render
-  const handleSelectEmployee = useCallback((employee: Employee) => {
-    alert(`Empleado: ${employee.name}\nCargo: ${employee.position}\nDepartamento: ${employee.department}`);
-  }, []);
 
   const createEmployee = useCreateEmployee();
   const updateEmployee = useUpdateEmployee();
@@ -75,7 +71,7 @@ function EmployeesPage() {
 
     // El API no valida emails duplicados por nosotros, asi que lo revisamos
     // del lado del cliente antes de mandar la mutación (misma regla de la Clase 6).
-    const emailTaken = allEmployees.some(emp => emp.email === newEmail.trim());
+    const emailTaken = allEmployees.some((emp: Employee) => emp.email === newEmail.trim());
     if (emailTaken) {
       setFormError(`Ya existe un empleado con el email ${newEmail.trim()}.`);
       return;
@@ -359,7 +355,7 @@ function EmployeesPage() {
       {/* Lista de empleados */}
       {!loading && !isError && employees.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {employees.map(employee => (
+          {employees.map((employee: Employee) => (
             <div key={employee.id} className="relative">
               <button
                 onClick={() => handleDeleteEmployee(employee.id)}
@@ -369,11 +365,12 @@ function EmployeesPage() {
               >
                 ×
               </button>
-              <EmployeeCard
-                employee={employee}
-                onSelect={handleSelectEmployee}
-                onToggleStatus={handleToggleStatus}
-              />
+              <Link to={`/empleados/${employee.id}`} className="block no-underline">
+                <EmployeeCard
+                  employee={employee}
+                  onToggleStatus={handleToggleStatus}
+                />
+              </Link>
             </div>
           ))}
         </div>
