@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "mock-api": "json-server --watch db.json --port 3001"
-  },
+  "dev": "vite",
+  "build": "tsc -b && vite build",
+  "lint": "eslint .",
+  "preview": "vite preview",
+  "mock-api": "json-server --watch db.json --port 3001",
+  "start": "json-server --watch db.json --port $PORT --host 0.0.0.0"
+},
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
     "axios": "^1.20.0",
