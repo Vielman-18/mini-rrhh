@@ -20,22 +20,20 @@ const nextStatus: Record<EmployeeStatus, EmployeeStatus> = {
 };
 
 function EmployeesPage() {
-  // Estado de los filtros — esto sigue siendo estado LOCAL (de la UI), no del servidor
+  // Estado de los filtros (UI)
   const [search, setSearch] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<Department | ''>('');
   const [selectedStatus, setSelectedStatus] = useState<EmployeeStatus | ''>('');
 
-  // Estado del SERVIDOR: la lista de empleados, filtrada. TanStack Query se encarga
-  // de pedirla, cachearla y mantenerla sincronizada — no hay useEffect ni useState local.
-  const { data, isLoading: loading, isError, error: queryError } = useEmployees({
+  // Estado del SERVIDOR con refetch incluido
+  const { data, isLoading: loading, isError, error: queryError, refetch } = useEmployees({
     search: search || undefined,
     department: selectedDepartment || undefined,
     status: selectedStatus || undefined,
   });
   const employees = data?.data || [];
 
-  // Segunda query, sin filtros — las estadísticas son sobre el TOTAL de empleados,
-  // no sobre el filtro activo, asi que necesitan su propia lista completa cacheada aparte.
+  // Segunda query sin filtros para estadísticas totales
   const { data: allData } = useEmployees({});
   const allEmployees = useMemo(() => allData?.data ?? [], [allData]);
   const totalEmployees = allEmployees.length;
@@ -47,12 +45,11 @@ function EmployeesPage() {
   const updateEmployee = useUpdateEmployee();
   const deleteEmployee = useDeleteEmployee();
 
-  // Estado del modal de creación/edición — reemplaza al formulario en línea de la Clase 7
+  // Estado del modal de creación/edición
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | undefined>();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Memoizamos el handler para no recrearlo en cada render
   const handleSelectEmployee = useCallback((employee: Employee) => {
     toast(`${employee.name} · ${employee.position} · ${employee.department}`);
   }, []);
@@ -65,7 +62,6 @@ function EmployeesPage() {
     });
   }, [deleteEmployee]);
 
-  // Actualiza el estado de un empleado (ciclo Activo → En permiso → Inactivo → Activo)
   const handleToggleStatus = useCallback((employee: Employee) => {
     updateEmployee.mutate(
       { id: employee.id, data: { status: nextStatus[employee.status] } },
@@ -88,8 +84,6 @@ function EmployeesPage() {
     setModalOpen(true);
   }, []);
 
-  // React Hook Form ya validó los datos con Zod antes de llegar acá —
-  // esta función solo decide crear vs. actualizar y llama a la mutación correcta.
   const handleSubmit = useCallback(async (formData: EmployeeFormData) => {
     setSubmitError(null);
     try {
@@ -143,7 +137,6 @@ function EmployeesPage() {
 
       {/* Barra de filtros */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex flex-wrap items-end gap-3">
-        {/* Búsqueda por texto */}
         <FormField label="Buscar" className="flex-1 min-w-[220px]">
           <input
             type="text"
@@ -154,7 +147,6 @@ function EmployeesPage() {
           />
         </FormField>
 
-        {/* Filtro por departamento */}
         <FormField label="Departamento" className="min-w-[180px]">
           <select
             value={selectedDepartment}
@@ -168,7 +160,6 @@ function EmployeesPage() {
           </select>
         </FormField>
 
-        {/* Filtro por estado */}
         <FormField label="Estado" className="min-w-[160px]">
           <select
             value={selectedStatus}
@@ -182,7 +173,6 @@ function EmployeesPage() {
           </select>
         </FormField>
 
-        {/* Botón limpiar filtros */}
         {(search || selectedDepartment || selectedStatus) && (
           <button
             onClick={() => { setSearch(''); setSelectedDepartment(''); setSelectedStatus(''); }}
@@ -201,13 +191,19 @@ function EmployeesPage() {
         </div>
       )}
 
-      {/* Estado de error */}
+      {/* Estado de error con botón refetch */}
       {isError && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-          <p className="text-red-700 font-medium">Error al cargar los empleados</p>
-          <p className="text-red-500 text-sm mt-1">
-            {(queryError as Error)?.message || 'Error desconocido'}
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center my-4">
+          <h3 className="text-lg font-semibold text-red-800 mb-2">Error al cargar empleados</h3>
+          <p className="text-sm text-red-600 mb-4">
+            {(queryError as Error)?.message || 'No se pudo conectar con el servidor.'}
           </p>
+          <button
+            onClick={() => refetch()}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+          >
+            Reintentar
+          </button>
         </div>
       )}
 
@@ -251,7 +247,7 @@ function EmployeesPage() {
         </div>
       )}
 
-      {/* Modal de creación/edición — React Hook Form + Zod */}
+      {/* Modal de creación/edición */}
       <Modal
         isOpen={modalOpen}
         title={editingEmployee ? `Editar: ${editingEmployee.name}` : 'Nuevo empleado'}
