@@ -1,5 +1,6 @@
 // src/pages/EmployeesPage.tsx
 import { useState, useCallback, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import type { Employee, Department, EmployeeStatus } from '../types';
 import EmployeeCard from '../components/EmployeCard';
 import StatsBadge from '../components/StatsBadge';
@@ -53,17 +54,26 @@ function EmployeesPage() {
 
   // Memoizamos el handler para no recrearlo en cada render
   const handleSelectEmployee = useCallback((employee: Employee) => {
-    alert(`Empleado: ${employee.name}\nCargo: ${employee.position}\nDepartamento: ${employee.department}`);
+    toast(`${employee.name} · ${employee.position} · ${employee.department}`);
   }, []);
 
   const handleDeleteEmployee = useCallback((id: number) => {
     if (!confirm('¿Estás seguro de eliminar este empleado?')) return;
-    deleteEmployee.mutate(id);
+    deleteEmployee.mutate(id, {
+      onSuccess: () => toast.success('Empleado eliminado correctamente'),
+      onError: () => toast.error('No se pudo eliminar el empleado'),
+    });
   }, [deleteEmployee]);
 
   // Actualiza el estado de un empleado (ciclo Activo → En permiso → Inactivo → Activo)
   const handleToggleStatus = useCallback((employee: Employee) => {
-    updateEmployee.mutate({ id: employee.id, data: { status: nextStatus[employee.status] } });
+    updateEmployee.mutate(
+      { id: employee.id, data: { status: nextStatus[employee.status] } },
+      {
+        onSuccess: () => toast.success(`Estado de ${employee.name} actualizado`),
+        onError: () => toast.error('No se pudo cambiar el estado'),
+      }
+    );
   }, [updateEmployee]);
 
   const handleOpenCreate = useCallback(() => {
@@ -85,12 +95,15 @@ function EmployeesPage() {
     try {
       if (editingEmployee) {
         await updateEmployee.mutateAsync({ id: editingEmployee.id, data: formData });
+        toast.success('Empleado actualizado correctamente');
       } else {
         await createEmployee.mutateAsync(formData);
+        toast.success('Empleado creado correctamente');
       }
       setModalOpen(false);
     } catch {
       setSubmitError('No se pudo guardar el empleado. Intenta de nuevo.');
+      toast.error('No se pudo guardar el empleado');
     }
   }, [editingEmployee, createEmployee, updateEmployee]);
 
