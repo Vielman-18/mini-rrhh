@@ -1,45 +1,73 @@
 // src/pages/EmployeesPage.tsx
-import { useState, useCallback, useMemo } from 'react';
-import toast from 'react-hot-toast';
+import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Employee, Department, EmployeeStatus } from '../types';
-import EmployeeCard from '../components/EmployeCard';
+import EmployeeTable from '../components/EmployeeTable';
+import Pagination from '../components/Pagination';
 import StatsBadge from '../components/StatsBadge';
 import FormField from '../components/FormField';
 import Modal from '../components/Modal';
 import EmployeeForm from '../components/EmployeeForm';
 import { useEmployees, useCreateEmployee, useUpdateEmployee, useDeleteEmployee } from '../hooks/useEmployees';
+import { useDebounce } from '../hooks/useDebounce';
+import { extractErrorMessage } from '../utils/errorHandler';
 import type { EmployeeFormData } from '../schemas/employeeSchema';
+import { useHasRole } from '../components/RoleGuard';
 
 const formFieldClass = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 
-// Ciclo de estados al hacer clic en la insignia de una tarjeta
-const nextStatus: Record<EmployeeStatus, EmployeeStatus> = {
-  active: 'on_leave',
-  on_leave: 'inactive',
-  inactive: 'active',
+const PAGE_SIZE = 5;
+const departments: Department[] = ['Tecnología', 'Recursos Humanos', 'Finanzas', 'Operaciones', 'Ventas'];
+const statuses: EmployeeStatus[] = ['active', 'inactive', 'on_leave'];
+const statusLabels: Record<EmployeeStatus, string> = {
+  active: 'Activo',
+  inactive: 'Inactivo',
+  on_leave: 'En permiso',
 };
 
-function EmployeesPage() {
-  // Estado de los filtros (UI)
-  const [search, setSearch] = useState<string>('');
-  const [selectedDepartment, setSelectedDepartment] = useState<Department | ''>('');
-  const [selectedStatus, setSelectedStatus] = useState<EmployeeStatus | ''>('');
+// Los parámetros de la URL los puede escribir cualquiera: se validan antes de usarlos
+const parsePage = (raw: string | null): number => {
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1 ? value : 1;
+};
 
-  // Estado del SERVIDOR con refetch incluido
-  const { data, isLoading: loading, isError, error: queryError, refetch } = useEmployees({
-    search: search || undefined,
+const parseOption = <T extends string>(raw: string | null, allowed: readonly T[]): T | '' =>
+  allowed.includes(raw as T) ? (raw as T) : '';
+
+function EmployeesPage() {
+  // Eliminar empleados es exclusivo del rol admin (hr solo puede editar).
+  // La acción se deshabilita según el rol sin bloquear la ruta ni ocultar la sección.
+  const canDeleteEmployees = useHasRole(['admin']);
+
+  // La página y los filtros no sensibles viven en la URL; un valor inválido se ignora
+  const [searchParams, setSearchParams] = useSearchParams();
+  const page = parsePage(searchParams.get('page'));
+  const selectedDepartment = parseOption(searchParams.get('dept'), departments);
+  const selectedStatus = parseOption(searchParams.get('status'), statuses);
+
+  // El texto buscado nunca se escribe en la URL (puede contener datos personales);
+  // el input lo guarda y la petición usa el valor con debounce
+  const [searchInput, setSearchInput] = useState<string>('');
+  const debouncedSearch = useDebounce(searchInput, 400);
+
+  // Estado del servidor: una página de empleados, filtrada
+  const { data, isLoading: loading, isPlaceholderData, isError, error: queryError, refetch } = useEmployees({
+    search: debouncedSearch || undefined,
     department: selectedDepartment || undefined,
     status: selectedStatus || undefined,
+    page,
+    pageSize: PAGE_SIZE,
   });
   const employees = data?.data || [];
+  const totalPages = data?.totalPages || 1;
 
-  // Segunda query sin filtros para estadísticas totales
-  const { data: allData } = useEmployees({});
+  // Segunda query, sin filtros: las estadísticas son sobre el total de empleados
+  const { data: allData, refetch: refetchAll } = useEmployees({});
   const allEmployees = useMemo(() => allData?.data ?? [], [allData]);
   const totalEmployees = allEmployees.length;
-  const activeEmployees = allEmployees.filter((emp: Employee) => emp.status === 'active').length;
-  const onLeaveEmployees = allEmployees.filter((emp: Employee) => emp.status === 'on_leave').length;
-  const inactiveEmployees = allEmployees.filter((emp: Employee) => emp.status === 'inactive').length;
+  const activeEmployees = allEmployees.filter(emp => emp.status === 'active').length;
+  const onLeaveEmployees = allEmployees.filter(emp => emp.status === 'on_leave').length;
+  const inactiveEmployees = allEmployees.filter(emp => emp.status === 'inactive').length;
 
   const createEmployee = useCreateEmployee();
   const updateEmployee = useUpdateEmployee();
@@ -50,63 +78,63 @@ function EmployeesPage() {
   const [editingEmployee, setEditingEmployee] = useState<Employee | undefined>();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleSelectEmployee = useCallback((employee: Employee) => {
-    toast(`${employee.name} · ${employee.position} · ${employee.department}`);
-  }, []);
-
-  const handleDeleteEmployee = useCallback((id: number) => {
-    if (!confirm('¿Estás seguro de eliminar este empleado?')) return;
-    deleteEmployee.mutate(id, {
-      onSuccess: () => toast.success('Empleado eliminado correctamente'),
-      onError: () => toast.error('No se pudo eliminar el empleado'),
+  // Cambia un filtro en la URL y vuelve a la página 1
+  const updateParams = (updates: Record<string, string | undefined>) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value) next.set(key, value);
+      else next.delete(key);
     });
-  }, [deleteEmployee]);
+    next.delete('page');
+    setSearchParams(next);
+  };
 
-  const handleToggleStatus = useCallback((employee: Employee) => {
-    updateEmployee.mutate(
-      { id: employee.id, data: { status: nextStatus[employee.status] } },
-      {
-        onSuccess: () => toast.success(`Estado de ${employee.name} actualizado`),
-        onError: () => toast.error('No se pudo cambiar el estado'),
-      }
-    );
-  }, [updateEmployee]);
+  // Al buscar solo se vuelve a la página 1; el texto no se refleja en la URL
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchParams.has('page')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('page');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
-  const handleOpenCreate = useCallback(() => {
+  const handlePageChange = (newPage: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('page', String(newPage));
+    setSearchParams(next);
+  };
+
+  const handleClearFilters = () => {
+    setSearchInput('');
+    setSearchParams({});
+  };
+
+  const handleOpenCreate = () => {
     setEditingEmployee(undefined);
     setSubmitError(null);
     setModalOpen(true);
-  }, []);
+  };
 
-  const handleOpenEdit = useCallback((employee: Employee) => {
+  const handleOpenEdit = (employee: Employee) => {
     setEditingEmployee(employee);
     setSubmitError(null);
     setModalOpen(true);
-  }, []);
+  };
 
-  const handleSubmit = useCallback(async (formData: EmployeeFormData) => {
+  // React Hook Form ya validó los datos con Zod antes de llegar aquí
+  const handleSubmit = async (formData: EmployeeFormData) => {
     setSubmitError(null);
     try {
       if (editingEmployee) {
         await updateEmployee.mutateAsync({ id: editingEmployee.id, data: formData });
-        toast.success('Empleado actualizado correctamente');
       } else {
         await createEmployee.mutateAsync(formData);
-        toast.success('Empleado creado correctamente');
       }
       setModalOpen(false);
     } catch {
       setSubmitError('No se pudo guardar el empleado. Intenta de nuevo.');
-      toast.error('No se pudo guardar el empleado');
     }
-  }, [editingEmployee, createEmployee, updateEmployee]);
-
-  const departments: Department[] = ['Tecnología', 'Recursos Humanos', 'Finanzas', 'Operaciones', 'Ventas'];
-  const statuses: EmployeeStatus[] = ['active', 'inactive', 'on_leave'];
-  const statusLabels: Record<EmployeeStatus, string> = {
-    active: 'Activo',
-    inactive: 'Inactivo',
-    on_leave: 'En permiso',
   };
 
   return (
@@ -116,7 +144,7 @@ function EmployeesPage() {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Gestión de Empleados</h2>
           <p className="text-slate-500 mt-1">
-            {loading ? 'Cargando...' : `${employees.length} de ${totalEmployees} empleados`}
+            {loading ? 'Cargando...' : `${data?.total ?? 0} de ${totalEmployees} empleados`}
           </p>
         </div>
         <button
@@ -137,20 +165,23 @@ function EmployeesPage() {
 
       {/* Barra de filtros */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex flex-wrap items-end gap-3">
+        {/* Búsqueda por texto */}
         <FormField label="Buscar" className="flex-1 min-w-[220px]">
           <input
             type="text"
             placeholder="Buscar por nombre, email o cargo..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            maxLength={100}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className={formFieldClass}
           />
         </FormField>
 
+        {/* Filtro por departamento */}
         <FormField label="Departamento" className="min-w-[180px]">
           <select
             value={selectedDepartment}
-            onChange={(e) => setSelectedDepartment(e.target.value as Department | '')}
+            onChange={(e) => updateParams({ dept: e.target.value || undefined })}
             className={formFieldClass}
           >
             <option value="">Todos los departamentos</option>
@@ -160,10 +191,11 @@ function EmployeesPage() {
           </select>
         </FormField>
 
+        {/* Filtro por estado */}
         <FormField label="Estado" className="min-w-[160px]">
           <select
             value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value as EmployeeStatus | '')}
+            onChange={(e) => updateParams({ status: e.target.value || undefined })}
             className={formFieldClass}
           >
             <option value="">Todos los estados</option>
@@ -173,9 +205,10 @@ function EmployeesPage() {
           </select>
         </FormField>
 
-        {(search || selectedDepartment || selectedStatus) && (
+        {/* Botón limpiar filtros */}
+        {(searchInput || selectedDepartment || selectedStatus) && (
           <button
-            onClick={() => { setSearch(''); setSelectedDepartment(''); setSelectedStatus(''); }}
+            onClick={handleClearFilters}
             className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-600 rounded-lg text-sm transition-colors"
           >
             Limpiar filtros
@@ -183,71 +216,41 @@ function EmployeesPage() {
         )}
       </div>
 
-      {/* Estado de carga */}
-      {loading && (
-        <div className="flex items-center justify-center py-16 text-slate-400">
-          <div className="animate-spin w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full mr-3" />
-          <span>Cargando empleados...</span>
-        </div>
-      )}
-
-      {/* Estado de error con botón refetch */}
+      {/* Estado de error */}
       {isError && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center my-4">
-          <h3 className="text-lg font-semibold text-red-800 mb-2">Error al cargar empleados</h3>
-          <p className="text-sm text-red-600 mb-4">
-            {(queryError as Error)?.message || 'No se pudo conectar con el servidor.'}
-          </p>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center" role="alert">
+          <p className="text-red-700 font-medium">Error al cargar los empleados</p>
+          <p className="text-red-500 text-sm mt-1">{extractErrorMessage(queryError)}</p>
           <button
-            onClick={() => refetch()}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+            onClick={() => { refetch(); refetchAll(); }}
+            className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
           >
             Reintentar
           </button>
         </div>
       )}
 
-      {/* Sin resultados */}
-      {!loading && !isError && employees.length === 0 && (
-        <div className="text-center py-12 text-slate-500">
-          <p>No se encontraron empleados con los filtros aplicados.</p>
-        </div>
+      {/* Tabla y paginación */}
+      {!isError && (
+        <>
+          <div className={isPlaceholderData ? 'opacity-60 transition-opacity' : ''}>
+            <EmployeeTable
+              employees={employees}
+              isLoading={loading}
+              onEdit={handleOpenEdit}
+              onDelete={canDeleteEmployees ? (id) => deleteEmployee.mutate(id) : undefined}
+            />
+          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+            isLoading={isPlaceholderData}
+          />
+        </>
       )}
 
-      {/* Lista de empleados */}
-      {!loading && !isError && employees.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {employees.map((employee: Employee) => (
-            <div key={employee.id} className="relative">
-              <div className="absolute -top-2.5 -right-2.5 z-10 flex gap-1">
-                <button
-                  onClick={() => handleOpenEdit(employee)}
-                  aria-label="Editar empleado"
-                  title="Editar empleado"
-                  className="w-6 h-6 rounded-full border-2 border-white bg-brand-600 text-white cursor-pointer text-xs leading-5 shadow-md"
-                >
-                  ✎
-                </button>
-                <button
-                  onClick={() => handleDeleteEmployee(employee.id)}
-                  aria-label="Eliminar empleado"
-                  title="Eliminar empleado"
-                  className="w-6 h-6 rounded-full border-2 border-white bg-red-500 text-white cursor-pointer text-sm leading-5 shadow-md"
-                >
-                  ×
-                </button>
-              </div>
-              <EmployeeCard
-                employee={employee}
-                onSelect={handleSelectEmployee}
-                onToggleStatus={handleToggleStatus}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Modal de creación/edición */}
+      {/* Modal de creación/edición (React Hook Form + Zod) */}
       <Modal
         isOpen={modalOpen}
         title={editingEmployee ? `Editar: ${editingEmployee.name}` : 'Nuevo empleado'}
