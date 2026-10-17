@@ -1,3 +1,4 @@
+// src/layout/Header.tsx
 import { Link, useLocation } from 'react-router-dom';
 import type { User } from '../types';
 
@@ -52,7 +53,9 @@ function Header({ user, onLogout }: HeaderProps) {
             </span>
             <span className="text-xs bg-blue-500 px-2 py-0.5 rounded-full
                              uppercase font-medium">
-              {user.role}
+              {typeof user.role === 'object'
+                ? (user.role as { name: string }).name
+                : user.role}
             </span>
             {onLogout && (
               <button
